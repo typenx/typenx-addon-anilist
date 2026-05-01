@@ -4,31 +4,99 @@ import type {
   CatalogRequest,
   CatalogResponse,
   ContentType,
+  ExternalLink,
   SearchRequest,
+  StaffCredit,
 } from '@typenx/addon-ts-sdk'
 
 const API_URL = 'https://graphql.anilist.co'
 
 const MEDIA_FIELDS = `
   id
+  idMal
   title {
     romaji
     english
     native
   }
+  synonyms
   description(asHtml: false)
   format
   status
+  season
   seasonYear
   episodes
+  duration
+  source(version: 3)
+  countryOfOrigin
+  startDate {
+    year
+    month
+    day
+  }
+  endDate {
+    year
+    month
+    day
+  }
   genres
+  tags {
+    name
+    rank
+    isMediaSpoiler
+  }
+  averageScore
+  meanScore
+  popularity
+  rankings {
+    rank
+    type
+    allTime
+    context
+  }
   updatedAt
+  siteUrl
+  trailer {
+    id
+    site
+  }
+  externalLinks {
+    site
+    url
+  }
   coverImage {
     extraLarge
     large
     medium
   }
   bannerImage
+  studios {
+    nodes {
+      name
+      isAnimationStudio
+    }
+  }
+  staff(perPage: 12, sort: RELEVANCE) {
+    edges {
+      role
+      node {
+        name {
+          full
+        }
+      }
+    }
+  }
+  streamingEpisodes {
+    title
+    thumbnail
+    site
+  }
+  airingSchedule(notYetAired: false, perPage: 25) {
+    nodes {
+      episode
+      airingAt
+    }
+  }
 `
 
 const CATALOG_QUERY = `
@@ -71,18 +139,92 @@ type AniListCoverImage = {
   medium?: string | null
 }
 
+type AniListFuzzyDate = {
+  year?: number | null
+  month?: number | null
+  day?: number | null
+}
+
+type AniListTag = {
+  name?: string | null
+  rank?: number | null
+  isMediaSpoiler?: boolean | null
+}
+
+type AniListRanking = {
+  rank?: number | null
+  type?: string | null
+  allTime?: boolean | null
+  context?: string | null
+}
+
+type AniListStudio = {
+  name?: string | null
+  isAnimationStudio?: boolean | null
+}
+
+type AniListStaffEdge = {
+  role?: string | null
+  node?: {
+    name?: {
+      full?: string | null
+    } | null
+  } | null
+}
+
+type AniListStreamingEpisode = {
+  title?: string | null
+  thumbnail?: string | null
+  site?: string | null
+}
+
+type AniListAiringEpisode = {
+  episode?: number | null
+  airingAt?: number | null
+}
+
+type AniListTrailer = {
+  id?: string | null
+  site?: string | null
+}
+
+type AniListExternalLink = {
+  site?: string | null
+  url?: string | null
+}
+
 type AniListMedia = {
   id: number
+  idMal?: number | null
   title?: AniListTitle | null
+  synonyms?: string[] | null
   description?: string | null
   format?: string | null
   status?: string | null
+  season?: string | null
   seasonYear?: number | null
   episodes?: number | null
+  duration?: number | null
+  source?: string | null
+  countryOfOrigin?: string | null
+  startDate?: AniListFuzzyDate | null
+  endDate?: AniListFuzzyDate | null
   genres?: string[] | null
+  tags?: AniListTag[] | null
+  averageScore?: number | null
+  meanScore?: number | null
+  popularity?: number | null
+  rankings?: AniListRanking[] | null
   updatedAt?: number | null
+  siteUrl?: string | null
+  trailer?: AniListTrailer | null
+  externalLinks?: AniListExternalLink[] | null
   coverImage?: AniListCoverImage | null
   bannerImage?: string | null
+  studios?: { nodes?: AniListStudio[] | null } | null
+  staff?: { edges?: AniListStaffEdge[] | null } | null
+  streamingEpisodes?: AniListStreamingEpisode[] | null
+  airingSchedule?: { nodes?: AniListAiringEpisode[] | null } | null
 }
 
 type GraphQlResponse<T> = {
@@ -179,23 +321,50 @@ function toPreview(media: AniListMedia): AnimePreview {
     id: String(media.id),
     title: titleOf(media),
     poster: imageOf(media),
-    year: media.seasonYear ?? null,
+    banner: media.bannerImage ?? null,
+    synopsis: cleanDescription(media.description),
+    score: scoreOf(media),
+    year: media.seasonYear ?? media.startDate?.year ?? null,
     content_type: contentTypeOf(media.format),
   }
 }
 
 function toMetadata(media: AniListMedia): AnimeMetadata {
+  const description = cleanDescription(media.description)
+  const studios = studiosOf(media)
   return {
     id: String(media.id),
     title: titleOf(media),
     original_title: media.title?.native ?? null,
-    synopsis: cleanDescription(media.description),
+    alternative_titles: alternativeTitlesOf(media),
+    synopsis: description,
+    description,
     poster: imageOf(media),
     banner: media.bannerImage ?? imageOf(media),
-    year: media.seasonYear ?? null,
+    year: media.seasonYear ?? media.startDate?.year ?? null,
+    season: media.season?.toLowerCase() ?? null,
+    season_year: media.seasonYear ?? media.startDate?.year ?? null,
     status: media.status?.toLowerCase() ?? null,
+    content_type: contentTypeOf(media.format),
+    source: media.source?.toLowerCase() ?? null,
+    duration_minutes: media.duration ?? null,
+    episode_count: media.episodes ?? null,
+    score: scoreOf(media),
+    rank: rankOf(media),
+    popularity: media.popularity ?? null,
+    rating: null,
     genres: media.genres ?? [],
-    episodes: createEpisodes(String(media.id), media.episodes ?? 0),
+    tags: tagsOf(media),
+    authors: authorsOf(media, studios),
+    studios,
+    staff: staffOf(media),
+    country_of_origin: media.countryOfOrigin ?? null,
+    start_date: fuzzyDate(media.startDate),
+    end_date: fuzzyDate(media.endDate),
+    site_url: media.siteUrl ?? null,
+    trailer_url: trailerUrl(media.trailer),
+    external_links: externalLinksOf(media),
+    episodes: episodesOf(media),
     updated_at: media.updatedAt
       ? new Date(media.updatedAt * 1000).toISOString()
       : new Date().toISOString(),
@@ -204,6 +373,15 @@ function toMetadata(media: AniListMedia): AnimeMetadata {
 
 function titleOf(media: AniListMedia) {
   return media.title?.english ?? media.title?.romaji ?? media.title?.native ?? String(media.id)
+}
+
+function alternativeTitlesOf(media: AniListMedia) {
+  return uniqueStrings([
+    media.title?.romaji,
+    media.title?.english,
+    media.title?.native,
+    ...(media.synonyms ?? []),
+  ]).filter((title) => title !== titleOf(media))
 }
 
 function imageOf(media: AniListMedia) {
@@ -216,7 +394,10 @@ function imageOf(media: AniListMedia) {
 }
 
 function cleanDescription(description: string | null | undefined) {
-  return description?.replace(/<br\s*\/?>/gi, '\n').trim() || null
+  return description
+    ?.replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?i>/gi, '')
+    .trim() || null
 }
 
 function contentTypeOf(format: string | null | undefined): ContentType {
@@ -227,19 +408,109 @@ function contentTypeOf(format: string | null | undefined): ContentType {
   return 'anime'
 }
 
-function createEpisodes(animeId: string, count: number) {
+function scoreOf(media: AniListMedia) {
+  const score = media.averageScore ?? media.meanScore
+  return typeof score === 'number' ? score / 10 : null
+}
+
+function rankOf(media: AniListMedia) {
+  return (
+    media.rankings?.find((ranking) => ranking.type === 'RATED' && ranking.allTime)
+      ?.rank ??
+    media.rankings?.find((ranking) => ranking.type === 'RATED')?.rank ??
+    null
+  )
+}
+
+function tagsOf(media: AniListMedia) {
+  return uniqueStrings(
+    (media.tags ?? [])
+      .filter((tag) => !tag.isMediaSpoiler)
+      .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0))
+      .slice(0, 12)
+      .map((tag) => tag.name),
+  )
+}
+
+function studiosOf(media: AniListMedia) {
+  const nodes = media.studios?.nodes ?? []
+  const animationStudios = nodes.filter((studio) => studio.isAnimationStudio)
+  return uniqueStrings((animationStudios.length ? animationStudios : nodes).map((studio) => studio.name))
+}
+
+function staffOf(media: AniListMedia): StaffCredit[] {
+  return (media.staff?.edges ?? [])
+    .map((edge) => ({
+      name: edge.node?.name?.full ?? '',
+      role: edge.role ?? null,
+    }))
+    .filter((credit) => credit.name)
+}
+
+function authorsOf(media: AniListMedia, studios: string[]) {
+  const authorRoles = ['Original Creator', 'Original Story', 'Story', 'Director', 'Series Composition']
+  const staffAuthors = staffOf(media)
+    .filter((credit) => credit.role && authorRoles.some((role) => credit.role?.includes(role)))
+    .map((credit) => credit.name)
+  return uniqueStrings(staffAuthors.length ? staffAuthors : studios)
+}
+
+function externalLinksOf(media: AniListMedia): ExternalLink[] {
+  return (media.externalLinks ?? [])
+    .filter((link): link is { site: string; url: string } => !!link.site && !!link.url)
+    .map((link) => ({ site: link.site, url: link.url }))
+}
+
+function trailerUrl(trailer: AniListTrailer | null | undefined) {
+  if (!trailer?.id || !trailer.site) return null
+  if (trailer.site === 'youtube') return `https://www.youtube.com/watch?v=${trailer.id}`
+  if (trailer.site === 'dailymotion') return `https://www.dailymotion.com/video/${trailer.id}`
+  return null
+}
+
+function episodesOf(media: AniListMedia) {
+  const streaming = media.streamingEpisodes ?? []
+  const schedule = new Map(
+    (media.airingSchedule?.nodes ?? [])
+      .filter((episode) => episode.episode)
+      .map((episode) => [episode.episode as number, episode.airingAt ?? null]),
+  )
+  const count = Math.max(
+    media.episodes ?? 0,
+    streaming.length,
+    ...Array.from(schedule.keys()),
+  )
+
   return Array.from({ length: count }, (_, index) => {
     const number = index + 1
+    const streamingEpisode = streaming[index]
+    const airedAt = schedule.get(number)
     return {
-      id: `${animeId}:${number}`,
-      anime_id: animeId,
+      id: `${media.id}:${number}`,
+      anime_id: String(media.id),
+      season_number: null,
       number,
-      title: null,
+      title: streamingEpisode?.title ?? `Episode ${number}`,
       synopsis: null,
-      thumbnail: null,
-      aired_at: null,
+      thumbnail: streamingEpisode?.thumbnail ?? null,
+      duration_minutes: media.duration ?? null,
+      source: streamingEpisode?.site ?? null,
+      aired_at: airedAt ? new Date(airedAt * 1000).toISOString() : null,
     }
   })
+}
+
+function fuzzyDate(date: AniListFuzzyDate | null | undefined) {
+  if (!date?.year) return null
+  const month = String(date.month ?? 1).padStart(2, '0')
+  const day = String(date.day ?? 1).padStart(2, '0')
+  return `${date.year}-${month}-${day}`
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+  )
 }
 
 function clampLimit(limit: number | undefined) {
