@@ -253,12 +253,17 @@ export class AniListCatalog {
 
   async search(request: SearchRequest): Promise<CatalogResponse> {
     const limit = clampLimit(request.limit)
+    const query = request.query.trim()
+    if (!query) {
+      return this.catalog({ catalog_id: 'popular', limit })
+    }
+
     const data = await this.graphql<{ Page: { media: AniListMedia[] } }>(
       SEARCH_QUERY,
       {
         page: 1,
         perPage: limit,
-        search: request.query,
+        search: query,
       },
     )
     return { items: data.Page.media.map(toPreview) }
