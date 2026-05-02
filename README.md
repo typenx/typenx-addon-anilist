@@ -2,7 +2,9 @@
 
 Official Typenx metadata addon backed by the AniList GraphQL API.
 
-This service provides catalog, search, anime metadata, and personalized recommendations. It does not return stream URLs or host media.
+This service provides catalog, search, anime metadata, and personalized recommendations. It plugs AniList into Typenx's self-hosted anime discovery stack without returning stream URLs or hosting media.
+
+If this addon is useful, star the main project at [typenx-core](https://github.com/typenx/typenx-core).
 
 ## Recommendations
 
