@@ -10,7 +10,7 @@ const addon = createTypenxAddon({
     version: '0.1.0',
     description: 'Official Typenx metadata addon backed by AniList.',
     icon: 'https://anilist.co/img/icons/android-chrome-512x512.png',
-    resources: ['catalog', 'search', 'anime_meta'],
+    resources: ['catalog', 'search', 'anime_meta', 'recommendations'],
     catalogs: [
       {
         id: 'popular',
@@ -36,6 +36,7 @@ const addon = createTypenxAddon({
     catalog: (request) => anilist.catalog(request),
     search: (request) => anilist.search(request),
     anime: (id) => anilist.anime(id),
+    recommendations: (request) => anilist.recommendations(request),
   },
 })
 

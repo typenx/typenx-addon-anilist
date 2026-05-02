@@ -7,7 +7,10 @@ import type {
   ExternalLink,
   SearchRequest,
   StaffCredit,
+  RecommendationRequest,
+  RecommendationResponse,
 } from '@typenx/addon-ts-sdk'
+import { recommendAnime } from './recommendations.js'
 
 const API_URL = 'https://graphql.anilist.co'
 
@@ -284,6 +287,19 @@ export class AniListCatalog {
     return toMetadata(data.Media)
   }
 
+  async recommendations(request: RecommendationRequest): Promise<RecommendationResponse> {
+    return recommendAnime(request, {
+      fetchAnime: (id) => this.anime(id),
+      fetchCandidates: async (limit) => {
+        const [trending, popular] = await Promise.all([
+          this.catalog({ catalog_id: 'trending', limit: Math.ceil(limit / 2) }),
+          this.catalog({ catalog_id: 'popular', limit: Math.ceil(limit / 2) }),
+        ])
+        return uniqueById([...trending.items, ...popular.items])
+      },
+    })
+  }
+
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -331,6 +347,7 @@ function toPreview(media: AniListMedia): AnimePreview {
     score: scoreOf(media),
     year: media.seasonYear ?? media.startDate?.year ?? null,
     content_type: contentTypeOf(media.format),
+    genres: media.genres ?? [],
   }
 }
 
@@ -516,6 +533,10 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(
     new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
   )
+}
+
+function uniqueById(items: AnimePreview[]) {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values())
 }
 
 function clampLimit(limit: number | undefined) {
