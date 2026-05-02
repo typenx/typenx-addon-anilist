@@ -399,7 +399,9 @@ function toMetadata(media: AniListMedia): AnimeMetadata {
     content_type: contentTypeOf(media),
     source: media.source?.toLowerCase() ?? null,
     duration_minutes: isManga ? null : media.duration ?? null,
-    episode_count: isManga ? media.chapters ?? media.volumes ?? null : media.episodes ?? null,
+    episode_count: isManga
+      ? positiveNumber(media.chapters) ?? positiveNumber(media.volumes)
+      : media.episodes ?? null,
     score: scoreOf(media),
     rank: rankOf(media),
     popularity: media.popularity ?? null,
@@ -476,6 +478,10 @@ function contentTypeOf(media: AniListMedia): ContentType {
 function scoreOf(media: AniListMedia) {
   const score = media.averageScore ?? media.meanScore
   return typeof score === 'number' ? score / 10 : null
+}
+
+function positiveNumber(value: number | null | undefined) {
+  return typeof value === 'number' && value > 0 ? value : null
 }
 
 function rankOf(media: AniListMedia) {
