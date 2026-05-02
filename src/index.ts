@@ -30,12 +30,31 @@ const addon = createTypenxAddon({
         content_type: 'anime',
         filters: [],
       },
+      {
+        id: 'manga-popular',
+        name: 'Popular Manga',
+        content_type: 'manga',
+        filters: [],
+      },
+      {
+        id: 'manga-trending',
+        name: 'Trending Manga',
+        content_type: 'manga',
+        filters: [],
+      },
+      {
+        id: 'manga-rated',
+        name: 'Top Rated Manga',
+        content_type: 'manga',
+        filters: [],
+      },
     ],
   },
   handlers: {
     catalog: (request) => anilist.catalog(request),
     search: (request) => anilist.search(request),
     anime: (id) => anilist.anime(id),
+    manga: (id) => anilist.manga(id),
     recommendations: (request) => anilist.recommendations(request),
   },
 })

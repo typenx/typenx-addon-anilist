@@ -17,6 +17,7 @@ const API_URL = 'https://graphql.anilist.co'
 const MEDIA_FIELDS = `
   id
   idMal
+  type
   title {
     romaji
     english
@@ -29,6 +30,8 @@ const MEDIA_FIELDS = `
   season
   seasonYear
   episodes
+  chapters
+  volumes
   duration
   source(version: 3)
   countryOfOrigin
@@ -103,9 +106,9 @@ const MEDIA_FIELDS = `
 `
 
 const CATALOG_QUERY = `
-  query TypenxCatalog($page: Int!, $perPage: Int!, $sort: [MediaSort], $status: MediaStatus) {
+  query TypenxCatalog($page: Int!, $perPage: Int!, $type: MediaType!, $sort: [MediaSort], $status: MediaStatus) {
     Page(page: $page, perPage: $perPage) {
-      media(type: ANIME, isAdult: false, sort: $sort, status: $status) {
+      media(type: $type, isAdult: false, sort: $sort, status: $status) {
         ${MEDIA_FIELDS}
       }
     }
@@ -113,18 +116,18 @@ const CATALOG_QUERY = `
 `
 
 const SEARCH_QUERY = `
-  query TypenxSearch($page: Int!, $perPage: Int!, $search: String!) {
+  query TypenxSearch($page: Int!, $perPage: Int!, $type: MediaType!, $search: String!) {
     Page(page: $page, perPage: $perPage) {
-      media(type: ANIME, isAdult: false, search: $search, sort: SEARCH_MATCH) {
+      media(type: $type, isAdult: false, search: $search, sort: SEARCH_MATCH) {
         ${MEDIA_FIELDS}
       }
     }
   }
 `
 
-const ANIME_QUERY = `
-  query TypenxAnime($id: Int!) {
-    Media(id: $id, type: ANIME) {
+const MEDIA_QUERY = `
+  query TypenxMedia($id: Int!, $type: MediaType!) {
+    Media(id: $id, type: $type) {
       ${MEDIA_FIELDS}
     }
   }
@@ -199,6 +202,7 @@ type AniListExternalLink = {
 type AniListMedia = {
   id: number
   idMal?: number | null
+  type?: 'ANIME' | 'MANGA' | null
   title?: AniListTitle | null
   synonyms?: string[] | null
   description?: string | null
@@ -207,6 +211,8 @@ type AniListMedia = {
   season?: string | null
   seasonYear?: number | null
   episodes?: number | null
+  chapters?: number | null
+  volumes?: number | null
   duration?: number | null
   source?: string | null
   countryOfOrigin?: string | null
@@ -245,6 +251,7 @@ export class AniListCatalog {
     const variables = {
       page: skipToPage(request.skip, limit),
       perPage: limit,
+      type: mediaTypeOf(request),
       ...catalogVariables(request.catalog_id),
     }
     const data = await this.graphql<{ Page: { media: AniListMedia[] } }>(
@@ -266,6 +273,7 @@ export class AniListCatalog {
       {
         page: 1,
         perPage: limit,
+        type: mediaTypeOf(request),
         search: query,
       },
     )
@@ -278,11 +286,28 @@ export class AniListCatalog {
       throw new Error(`Invalid AniList anime id: ${id}`)
     }
 
-    const data = await this.graphql<{ Media: AniListMedia | null }>(ANIME_QUERY, {
+    const data = await this.graphql<{ Media: AniListMedia | null }>(MEDIA_QUERY, {
       id: numericId,
+      type: 'ANIME',
     })
     if (!data.Media) {
       throw new Error(`AniList anime not found: ${id}`)
+    }
+    return toMetadata(data.Media)
+  }
+
+  async manga(id: string): Promise<AnimeMetadata> {
+    const numericId = Number(id)
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      throw new Error(`Invalid AniList manga id: ${id}`)
+    }
+
+    const data = await this.graphql<{ Media: AniListMedia | null }>(MEDIA_QUERY, {
+      id: numericId,
+      type: 'MANGA',
+    })
+    if (!data.Media) {
+      throw new Error(`AniList manga not found: ${id}`)
     }
     return toMetadata(data.Media)
   }
@@ -328,11 +353,14 @@ export class AniListCatalog {
 }
 
 function catalogVariables(catalogId: string) {
-  if (catalogId === 'trending') {
+  if (catalogId === 'trending' || catalogId === 'manga-trending') {
     return { sort: ['TRENDING_DESC'] }
   }
   if (catalogId === 'airing') {
     return { sort: ['POPULARITY_DESC'], status: 'RELEASING' }
+  }
+  if (catalogId === 'manga-rated') {
+    return { sort: ['SCORE_DESC'] }
   }
   return { sort: ['POPULARITY_DESC'] }
 }
@@ -346,7 +374,7 @@ function toPreview(media: AniListMedia): AnimePreview {
     synopsis: cleanDescription(media.description),
     score: scoreOf(media),
     year: media.seasonYear ?? media.startDate?.year ?? null,
-    content_type: contentTypeOf(media.format),
+    content_type: contentTypeOf(media),
     genres: media.genres ?? [],
   }
 }
@@ -354,6 +382,7 @@ function toPreview(media: AniListMedia): AnimePreview {
 function toMetadata(media: AniListMedia): AnimeMetadata {
   const description = cleanDescription(media.description)
   const studios = studiosOf(media)
+  const isManga = isMangaMedia(media)
   return {
     id: String(media.id),
     title: titleOf(media),
@@ -364,13 +393,13 @@ function toMetadata(media: AniListMedia): AnimeMetadata {
     poster: imageOf(media),
     banner: media.bannerImage ?? imageOf(media),
     year: media.seasonYear ?? media.startDate?.year ?? null,
-    season: media.season?.toLowerCase() ?? null,
-    season_year: media.seasonYear ?? media.startDate?.year ?? null,
+    season: isManga ? null : media.season?.toLowerCase() ?? null,
+    season_year: isManga ? media.startDate?.year ?? null : media.seasonYear ?? media.startDate?.year ?? null,
     status: media.status?.toLowerCase() ?? null,
-    content_type: contentTypeOf(media.format),
+    content_type: contentTypeOf(media),
     source: media.source?.toLowerCase() ?? null,
-    duration_minutes: media.duration ?? null,
-    episode_count: media.episodes ?? null,
+    duration_minutes: isManga ? null : media.duration ?? null,
+    episode_count: isManga ? media.chapters ?? media.volumes ?? null : media.episodes ?? null,
     score: scoreOf(media),
     rank: rankOf(media),
     popularity: media.popularity ?? null,
@@ -386,7 +415,7 @@ function toMetadata(media: AniListMedia): AnimeMetadata {
     site_url: media.siteUrl ?? null,
     trailer_url: trailerUrl(media.trailer),
     external_links: externalLinksOf(media),
-    episodes: episodesOf(media),
+    episodes: isManga ? [] : episodesOf(media),
     updated_at: media.updatedAt
       ? new Date(media.updatedAt * 1000).toISOString()
       : new Date().toISOString(),
@@ -422,11 +451,25 @@ function cleanDescription(description: string | null | undefined) {
     .trim() || null
 }
 
-function contentTypeOf(format: string | null | undefined): ContentType {
-  if (format === 'MOVIE') return 'movie'
-  if (format === 'OVA') return 'ova'
-  if (format === 'ONA') return 'ona'
-  if (format === 'SPECIAL') return 'special'
+function mediaTypeOf(request: CatalogRequest | SearchRequest) {
+  const catalogId = 'catalog_id' in request ? request.catalog_id : ''
+  return request.content_type === 'manga' || catalogId.startsWith('manga-')
+    ? 'MANGA'
+    : 'ANIME'
+}
+
+function isMangaMedia(media: AniListMedia) {
+  return media.type === 'MANGA'
+}
+
+function contentTypeOf(media: AniListMedia): ContentType {
+  if (isMangaMedia(media)) {
+    return media.format === 'NOVEL' ? 'light_novel' : 'manga'
+  }
+  if (media.format === 'MOVIE') return 'movie'
+  if (media.format === 'OVA') return 'ova'
+  if (media.format === 'ONA') return 'ona'
+  if (media.format === 'SPECIAL') return 'special'
   return 'anime'
 }
 
